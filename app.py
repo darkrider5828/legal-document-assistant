@@ -6,54 +6,36 @@ import textwrap
 # --- Helper Functions ---
 
 def inject_custom_css():
-    """
-    Injects custom CSS for a more polished and readable UI.
-    This version includes the fix for invisible chat text.
-    """
+    """Injects custom CSS for a more polished and readable UI."""
     st.markdown("""
         <style>
             .main {
                 background-color: #F0F2F6;
             }
-            
-            /* User chat message */
-            .st-emotion-cache-1c7y2kd { 
-                background-color: #E1F5FE; /* A light blue for user messages */
+            .st-emotion-cache-1c7y2kd { /* User chat message */
+                background-color: #E1F5FE;
             }
-
-            /* Assistant chat message */
-            .st-emotion-cache-4oy321 { 
+            .st-emotion-cache-4oy321 { /* Assistant chat message */
                 background-color: #FFFFFF;
             }
-
-            /* --- FIX FOR INVISIBLE TEXT --- */
-            /* Ensure text inside chat messages is dark and readable */
+            /* Fix for invisible text in chat bubbles */
             .st-emotion-cache-1c7y2kd p,
             .st-emotion-cache-4oy321 p {
-                color: #262730; /* A dark color for the text, ensures visibility */
-            }
-            /* --- END OF FIX --- */
-            
-            .stButton>button {
-                border-radius: 5px;
+                color: #262730; 
             }
         </style>
     """, unsafe_allow_html=True)
 
 @st.cache_resource
 def initialize_model():
-    """
-    Initializes the Gemini model using the API key from Streamlit secrets.
-    Uses st.cache_resource to ensure the model is loaded only once.
-    """
+    """Initializes the Gemini model using the API key from Streamlit secrets."""
     try:
         api_key = st.secrets["GEMINI_API_KEY"]
         genai.configure(api_key=api_key)
-        # Using the gemini-1.5-flash model as specified in your code
         model = genai.GenerativeModel('gemini-1.5-flash')
         return model
     except KeyError:
-        st.error("Gemini API key not found. Please add it to `.streamlit/secrets.toml`.")
+        st.error("Gemini API key not found. Please add it to your Streamlit secrets.")
         st.stop()
     except Exception as e:
         st.error(f"An error occurred during model initialization: {e}")
@@ -61,8 +43,7 @@ def initialize_model():
 
 def extract_text_from_pdf(uploaded_file):
     """Extracts text from an uploaded PDF file."""
-    if uploaded_file is None:
-        return None
+    if uploaded_file is None: return None
     try:
         with pdfplumber.open(uploaded_file) as pdf:
             return "".join(page.extract_text() for page in pdf.pages if page.extract_text())
@@ -81,35 +62,23 @@ def get_gemini_response(model, prompt_text):
 # --- Main Application Logic ---
 
 def main():
-    # --- Page Configuration ---
-    st.set_page_config(
-        page_title="GenAI Legal Document Assistant",
-        page_icon="⚖️",
-        layout="wide"
-    )
+    st.set_page_config(page_title="GenAI Legal Document Assistant", page_icon="⚖️", layout="wide")
     inject_custom_css()
 
     st.title("⚖️ GenAI Legal Document Assistant")
-    st.markdown("Understand your legal documents instantly. Upload a PDF to get a simple summary, risk analysis, and ask questions.")
+    st.markdown("Upload a legal document to get a simple summary, an automated risk analysis, and ask questions.")
 
     model = initialize_model()
 
     # --- Session State Management ---
-    if "analysis_complete" not in st.session_state:
-        st.session_state.analysis_complete = False
-    if "document_text" not in st.session_state:
-        st.session_state.document_text = None
-    if "messages" not in st.session_state:
-        st.session_state.messages = []
+    if "analysis_complete" not in st.session_state: st.session_state.analysis_complete = False
+    if "document_text" not in st.session_state: st.session_state.document_text = None
+    if "messages" not in st.session_state: st.session_state.messages = []
 
     # --- Sidebar for File Upload ---
     with st.sidebar:
         st.header("1. Upload Document")
-        uploaded_file = st.file_uploader(
-            "Choose a PDF file",
-            type="pdf",
-            help="Only PDF files are accepted."
-        )
+        uploaded_file = st.file_uploader("Choose a PDF file", type="pdf")
 
         if st.button("Analyze Document", use_container_width=True, type="primary"):
             if uploaded_file is not None:
@@ -117,44 +86,39 @@ def main():
                     st.session_state.document_text = extract_text_from_pdf(uploaded_file)
                 
                 if st.session_state.document_text:
-                    with st.spinner("AI is analyzing the document. This may take a moment..."):
+                    with st.spinner("AI is analyzing the document..."):
                         
-                        # --- PROMPT 1: The Summary Prompt (Unchanged) ---
+                        # --- PROMPT 1: Summary Prompt ---
                         summary_prompt = textwrap.dedent(f"""
-                            **Role:** You are an AI assistant specializing in simplifying complex legal documents for a general audience. Your goal is to provide clarity, not legal advice.
-                            **Task:** Analyze the following legal document and generate a concise, easy-to-understand summary.
+                            **Role:** AI assistant specializing in simplifying legal documents.
+                            **Task:** Generate a concise, easy-to-understand summary.
                             **Instructions:**
-                            1.  **Core Purpose:** Begin with a single sentence that clearly states the document's main purpose.
-                            2.  **Key Parties:** Identify the primary parties involved and their roles.
-                            3.  **Main Obligations:** In a short paragraph, outline the essential obligations of each party.
-                            4.  **Language:** Use simple, plain English. Avoid jargon.
-                            **Document Text:**\n---\n{st.session_state.document_text}\n---\n**Generated Summary:**
+                            1. Start with the document's main purpose.
+                            2. Identify the key parties involved.
+                            3. Outline the essential obligations for each party.
+                            4. Use plain English and avoid jargon.
+                            **Document Text:**\n---\n{st.session_state.document_text}\n---\n**Summary:**
                         """)
                         
-                        # --- PROMPT 2: EDITED Risk Analysis with Safety Indicators ---
+                        # --- PROMPT 2: Risk Analysis with Safety Indicators ---
                         risks_prompt = textwrap.dedent(f"""
                             **Role:** AI risk analyst for contracts.
                             **Task:** Analyze the document and categorize key clauses into three levels: high risk, key responsibilities, and standard provisions.
-
                             **Output Format:**
-                            Use Markdown with the following specific categories and emoji indicators. For each point, provide a brief, simple explanation.
-
+                            Use Markdown with the following specific categories and emoji indicators:
                             **⚠️ High-Priority Clauses & Risks:**
-                            *   Identify clauses related to significant financial penalties, liabilities, non-standard termination conditions, or automatic renewals that could be detrimental to the signer.
-
+                            *   Identify clauses on penalties, liabilities, non-standard termination, or automatic renewals.
                             **📝 Key User Responsibilities:**
-                            *   List specific actions, duties, or obligations the signer must perform to comply with the agreement (e.g., payment schedules, notice requirements, confidentiality rules).
-
+                            *   List specific actions the signer must perform (e.g., payments, notices, confidentiality).
                             **✅ Standard & Benign Provisions:**
-                            *   List common, low-risk clauses (e.g., governing law, severability, force majeure) that are standard in such agreements.
-
+                            *   List common, low-risk clauses (e.g., governing law, severability).
                             **Document Text:**\n---\n{st.session_state.document_text}\n---\n**Categorized Analysis:**
                         """)
 
                         st.session_state.summary = get_gemini_response(model, summary_prompt)
                         st.session_state.risks = get_gemini_response(model, risks_prompt)
                         st.session_state.analysis_complete = True
-                        st.session_state.messages = [] # Reset chat on new analysis
+                        st.session_state.messages = []
                     st.success("Analysis Complete!")
                 else:
                     st.error("Failed to extract text. The PDF might be image-based or corrupted.")
@@ -162,20 +126,17 @@ def main():
                 st.warning("Please upload a document first.")
 
     # --- Main Content Display ---
-    if not st.session_state.analysis_complete:
-        st.info("Upload your document and click 'Analyze Document' to see the results.")
-    else:
+    if st.session_state.analysis_complete:
         st.subheader("Analysis Results")
         
-        col1, col2 = st.columns([1, 1.2]) # Giving more space to the detailed analysis
+        col1, col2 = st.columns([1, 1.2])
         with col1:
             st.markdown("#### 📝 Simple Summary")
             st.markdown(st.session_state.summary)
 
         with col2:
             st.markdown("#### 📊 Risk & Clause Breakdown")
-            # Displaying the new categorized analysis directly without an expander
-            st.markdown(st.session_state.risks)
+            st.markdown(st.session_state.risks) 
 
         st.divider()
 
@@ -186,32 +147,34 @@ def main():
             with st.chat_message(message["role"]):
                 st.markdown(message["content"])
 
-        if prompt := st.chat_input("Ask a specific question (e.g., 'What is the late fee?')"):
+        if prompt := st.chat_input("Ask a factual question (e.g., 'What is the late fee?')"):
             st.session_state.messages.append({"role": "user", "content": prompt})
-            with st.chat_message("user"):
-                st.markdown(prompt)
+            with st.chat_message("user"): st.markdown(prompt)
 
             with st.chat_message("assistant"):
                 with st.spinner("Searching for the answer..."):
-                    # --- PROMPT 3: EDITED Smarter Q&A Prompt ---
+                    # --- PROMPT 3: FINAL, SMARTER Q&A PROMPT ---
                     qa_prompt = textwrap.dedent(f"""
                         **Role:** You are a helpful AI assistant for document analysis.
 
-                        **Core Task:** Answer user questions based *exclusively* on the provided document text.
+                        **Instructions Hierarchy (Follow in this order):**
 
-                        **Special Instructions for Safety/Opinion Questions:**
+                        **1. Handle Greetings:**
+                        If the user's question is a simple greeting (like "hi", "hello", "hey"), respond with a friendly greeting and remind them of your purpose.
+                        *   **Example Response:** "Hello! I'm ready to answer your questions about the document. What would you like to know?"
+
+                        **2. Handle Opinion/Safety Questions:**
                         If the user asks for a legal opinion, or asks if the document is "safe," "fair," or "good," follow these steps:
-                        1.  State clearly that you cannot provide legal advice.
-                        2.  Explain that safety and fairness depend on individual circumstances and legal interpretation.
-                        3.  Direct the user to review the "Risk & Clause Breakdown" for potential issues identified in the document.
-                        4.  Recommend consulting a qualified legal professional for a definitive opinion.
+                        *   State clearly that you cannot provide legal advice.
+                        *   Direct the user to review the "Risk & Clause Breakdown" for potential issues.
+                        *   Recommend consulting a qualified legal professional for a definitive opinion.
 
-                        **Standard Q&A Instructions:**
-                        For all other factual questions:
-                        1.  Locate the exact information in the document text.
-                        2.  Provide the answer based only on that text.
-                        3.  Cite the source by including a relevant quote, prefixed with "**Source:**".
-                        4.  If the answer is not found, state: "I could not find an answer to your question in the provided document."
+                        **3. Handle Factual Questions (Default Task):**
+                        For all other questions, perform a factual Q&A based *exclusively* on the provided document text.
+                        *   Locate the exact information in the document.
+                        *   Provide the answer based only on that text.
+                        *   Cite the source by including a relevant quote, prefixed with "**Source:**".
+                        *   If the answer is not found, state: "I could not find an answer to your question in the provided document."
 
                         **Document Text:**\n---\n{st.session_state.document_text}\n---\n**User's Question:** "{prompt}"\n**Factual Answer:**
                     """)
