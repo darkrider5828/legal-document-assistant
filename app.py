@@ -2,8 +2,6 @@ import streamlit as st
 import pdfplumber
 import google.generativeai as genai
 import textwrap
-import markdown2
-from weasyprint import HTML, CSS
 
 # --- Page Configuration ---
 st.set_page_config(
@@ -33,6 +31,9 @@ def initialize_model():
         api_key = st.secrets["GEMINI_API_KEY"]
         genai.configure(api_key=api_key)
         return genai.GenerativeModel('gemini-1.5-flash')
+    except KeyError:
+        st.error("Gemini API key not found. Please add it to your Streamlit secrets (`.streamlit/secrets.toml`).")
+        st.stop()
     except Exception as e:
         st.error(f"Error initializing AI model. Please check your API key. Details: {e}")
         st.stop()
@@ -54,27 +55,6 @@ def get_gemini_response(model, prompt_text):
     except Exception as e:
         return f"Could not get response from AI. Error: {e}"
 
-# --- NEW FUNCTION FOR PDF GENERATION ---
-def create_pdf_report(markdown_content):
-    """Converts a markdown string into a styled PDF bytes object."""
-    html_content = markdown2.markdown(markdown_content, extras=["fenced-code-blocks", "tables"])
-    
-    # Professional CSS for styling the PDF report
-    css_style = CSS(string="""
-        @page { size: A4; margin: 2cm; }
-        body { font-family: 'Helvetica', sans-serif; font-size: 11pt; line-height: 1.6; }
-        h1, h2, h3 { font-family: 'Arial', sans-serif; color: #1a1a1a; }
-        h1 { font-size: 24pt; border-bottom: 3px solid #007BFF; padding-bottom: 10px; margin-bottom: 20px; }
-        h2 { font-size: 16pt; color: #007BFF; margin-top: 30px; border-bottom: 1px solid #ddd; padding-bottom: 5px; }
-        ul { list-style-type: disc; padding-left: 20px; }
-        li { margin-bottom: 10px; }
-        p { text-align: justify; }
-        code { background-color: #f4f4f4; padding: 2px 5px; border-radius: 3px; font-family: monospace; }
-    """)
-    
-    pdf_bytes = HTML(string=html_content).write_pdf(stylesheets=[css_style])
-    return pdf_bytes
-
 # --- Main Application Logic ---
 
 def main():
@@ -87,6 +67,10 @@ def main():
     if "analysis_done" not in st.session_state: st.session_state.analysis_done = False
     if "messages" not in st.session_state: st.session_state.messages = []
     if "doc_text" not in st.session_state: st.session_state.doc_text = None
+    if "summary" not in st.session_state: st.session_state.summary = ""
+    if "risks" not in st.session_state: st.session_state.risks = ""
+    if "dashboard" not in st.session_state: st.session_state.dashboard = ""
+
 
     # --- Sidebar for File Upload ---
     with st.sidebar:
@@ -100,11 +84,28 @@ def main():
                 
                 if st.session_state.doc_text:
                     with st.spinner("The Eagle is analyzing... This may take a moment."):
-                        # ... [All your AI prompts remain the same here] ...
-                        summary_prompt = textwrap.dedent(f"Summarize this document's purpose, parties, and key obligations in plain English:\n---\n{st.session_state.doc_text}")
-                        risks_prompt = textwrap.dedent(f"""Analyze this document... (Your full risk prompt)""")
-                        dashboard_prompt = textwrap.dedent(f"""From this document, extract key entities... (Your full dashboard prompt)""")
+                        # --- Multi-Prompt AI Analysis ---
                         
+                        # Prompt 1: Summary
+                        summary_prompt = textwrap.dedent(f"Summarize this document's purpose, parties, and key obligations in plain English:\n---\n{st.session_state.doc_text}")
+                        
+                        # Prompt 2: Risk Analysis with Indicators
+                        risks_prompt = textwrap.dedent(f"""
+                            Analyze this document for risks and key clauses. Categorize them using these exact markdown headers and emojis:
+                            - **⚠️ High-Priority Risks:** (e.g., penalties, liabilities, auto-renewals)
+                            - **📝 Key Responsibilities:** (e.g., payment duties, notice periods, confidentiality)
+                            - **✅ Standard Provisions:** (e.g., governing law, severability)
+                            Document:\n---\n{st.session_state.doc_text}
+                        """)
+
+                        # Prompt 3: Executive Dashboard & Action Items (THE "WOW" FACTOR)
+                        dashboard_prompt = textwrap.dedent(f"""
+                            From this document, extract key entities and generate a user checklist. Use these exact markdown headers:
+                            - **📊 Key Information Dashboard:** (List Parties, Key Dates, Financial Amounts)
+                            - **📋 Recommended Action Items:** (Create a checklist of next steps for the user)
+                            Document:\n---\n{st.session_state.doc_text}
+                        """)
+
                         st.session_state.summary = get_gemini_response(model, summary_prompt)
                         st.session_state.risks = get_gemini_response(model, risks_prompt)
                         st.session_state.dashboard = get_gemini_response(model, dashboard_prompt)
@@ -116,12 +117,15 @@ def main():
                 st.warning("Please upload a document first.")
 
     # --- Main Content Display ---
-    if st.session_state.analysis_done:
-        # ... [The display logic for dashboard, summary, and risks remains the same] ...
+    if not st.session_state.analysis_done:
+        st.info("Upload your document and click 'Analyze Document' to begin.")
+    else:
+        # --- The Executive Dashboard ---
         st.subheader("Executive Overview")
         st.markdown(st.session_state.dashboard)
         st.divider()
 
+        # --- Detailed Analysis Columns ---
         st.subheader("Detailed Analysis")
         col1, col2 = st.columns(2)
         with col1:
@@ -131,10 +135,11 @@ def main():
             st.markdown("#### 📊 Risk & Clause Breakdown")
             st.markdown(st.session_state.risks)
         
-        # --- UPDATED Download Report Button ---
-        full_report_md = f"""
+        # --- Download Report Button ---
+        full_report = f"""
 # Legal Eagle AI Analysis Report
 
+## Executive Overview
 {st.session_state.dashboard}
 ---
 ## Simple Summary
@@ -143,15 +148,11 @@ def main():
 ## Risk & Clause Breakdown
 {st.session_state.risks}
         """
-        
-        # Generate PDF bytes using the new function
-        pdf_bytes = create_pdf_report(full_report_md)
-        
         st.download_button(
-            label="📥 Download PDF Report",
-            data=pdf_bytes,
-            file_name="Legal_Eagle_AI_Report.pdf",
-            mime="application/pdf",
+            label="📥 Download Full Report",
+            data=full_report,
+            file_name="Legal_Eagle_AI_Report.md",
+            mime="text/markdown",
             use_container_width=True
         )
 
@@ -159,7 +160,6 @@ def main():
 
         # --- Chatbot Interface ---
         st.subheader("💬 Chat with Your Document")
-        # ... [The chatbot logic remains the same] ...
         for msg in st.session_state.messages:
             st.chat_message(msg["role"]).write(msg["content"])
 
@@ -168,7 +168,15 @@ def main():
             st.chat_message("user").write(prompt)
             
             with st.spinner("Thinking..."):
-                qa_prompt = textwrap.dedent(f"""... (Your full, smart Q&A prompt)...""")
+                # The final, smartest Q&A prompt
+                qa_prompt = textwrap.dedent(f"""
+                    **Role:** AI Assistant answering questions about a legal document.
+                    **Instructions Hierarchy:**
+                    1. **Handle Greetings:** If the user says "hi" or "hello", give a friendly greeting.
+                    2. **Handle Opinions:** If the user asks if the doc is "safe" or "fair", state you cannot give legal advice and direct them to the risk analysis.
+                    3. **Handle Factual Questions:** Answer questions using *only* the document text provided. Cite your source with a quote. If the answer isn't in the text, say so.
+                    **Document Text:**\n---\n{st.session_state.doc_text}\n---\n**User's Question:** "{prompt}"\n**Answer:**
+                """)
                 response = get_gemini_response(model, qa_prompt)
                 st.session_state.messages.append({"role": "assistant", "content": response})
                 st.chat_message("assistant").write(response)
